@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>COSMIC POP</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{
+  background:#000;
+  display:flex;align-items:center;justify-content:center;
+  width:100vw;height:100vh;overflow:hidden;
+  font-family:'Courier New',monospace;
+  touch-action:none;
+}
+#wrap{
+  position:relative;
+  width:min(100vw,100vh);
+  height:min(100vw,100vh);
+  max-width:640px;max-height:640px;
+}
+canvas{width:100%;height:100%;display:block;cursor:crosshair;}
+#ui-top{
+  position:absolute;top:0;left:0;right:0;
+  display:flex;justify-content:space-between;
+  padding:10px 14px;pointer-events:none;z-index:2;
+}
+#ui-bot{
+  position:absolute;bottom:18px;left:0;right:0;
+  text-align:center;pointer-events:none;z-index:2;
+}
+.ut{color:#0ff;font-size:clamp(10px,2vw,13px);font-weight:bold;
+  text-shadow:0 0 8px #0ff;letter-spacing:1px;line-height:1.7;}
+.ut span{color:#ff0;text-shadow:0 0 8px #ff0;}
+#shots-ui{
+  display:inline-flex;gap:6px;align-items:center;
+  background:rgba(0,0,0,0.6);border:1px solid rgba(0,255,255,0.3);
+  border-radius:20px;padding:6px 16px;
+}
+.shot-dot{
+  width:12px;height:12px;border-radius:50%;
+  background:#0ff;box-shadow:0 0 8px #0ff;
+  display:inline-block;
+}
+.shot-dot.used{background:#333;box-shadow:none;}
+#flash{position:absolute;inset:0;pointer-events:none;z-index:5;opacity:0;}
+#overlay{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:12px;z-index:10;background:rgba(0,0,0,0.9);
+}
+.ot{font-size:clamp(24px,7vw,48px);font-weight:bold;letter-spacing:4px;text-align:center;}
+.os{font-size:clamp(11px,2.5vw,15px);color:#aaa;text-align:center;letter-spacing:1px;line-height:1.7;}
+.btn{
+  background:transparent;border:2px solid #0ff;color:#0ff;
+  font-family:'Courier New',monospace;font-size:clamp(13px,3vw,17px);
+  font-weight:bold;letter-spacing:3px;padding:11px 32px;
+  cursor:pointer;border-radius:4px;text-shadow:0 0 8px #0ff;
+  box-shadow:0 0 16px #0ff,inset 0 0 16px rgba(0,255,255,0.08);
+  margin-top:6px;transition:background 0.15s;
+}
+.btn:hover{background:rgba(0,255,255,0.12);}
+.btn.red{border-color:#f55;color:#f55;text-shadow:0 0 8px #f55;box-shadow:0 0 16px #f55;}
+.btn.gray{border-color:#444;color:#444;box-shadow:none;text-shadow:none;}
+#progress-wrap{
+  position:absolute;bottom:0;left:0;right:0;
+  height:4px;background:rgba(255,255,255,0.08);pointer-events:none;z-index:2;
+}
+#progress-bar{height:100%;background:linear-gradient(90deg,#0ff,#f0f);width:1%;transition:width 0.4s;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="ui-top">
+    <div class="ut" id="ui-left">STAGE: <span id="u-stage">01</span>/100<br>REQUIRED: <span id="u-req">30</span>%</div>
+    <div class="ut" style="text-align:right">SCORE: <span id="u-score">000000</span><br>BEST COMBO: <span id="u-combo">0</span></div>
+  </div>
+  <div id="ui-bot"><div id="shots-ui"></div></div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="flash"></div>
+  <div id="overlay">
+    <div class="ot" style="color:#0ff;text-shadow:0 0 20px #0ff,0 0 40px #0ff">COSMIC POP</div>
+    <div class="os">오브를 쏴서 연쇄 폭발을 일으켜라!<br>목표 % 이상 파괴하면 클리어</div>
+    <div class="os" style="color:#f0f">클릭 / 탭으로 발사</div>
+    <button class="btn" onclick="startGame()">FIRE ▶</button>
+  </div>
+</div>
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const W=640,H=640;
+canvas.width=W;canvas.height=H;
+
+const flashEl=document.getElementById('flash');
+const overlay=document.getElementById('overlay');
+
+let stage=1,score=0,bestCombo=0,state='menu';
+let orbs=[],balls=[],particles=[],scoreTexts=[];
+let shotsLeft=0,shotsTotal=0;
+let orbsPopped=0,orbsTotal=0,chainCombo=0;
+let shakeX=0,shakeY=0,shakePow=0;
+let chainTimer=0; // 연쇄 타이머 (연쇄 중이면 콤보 증가)
+let stageClearing=false;
+
+// ── 난이도 ─────────────────────────────
+function getDiff(s){
+  const t=(s-1)/99;
+  return {
+    orbCount:  Math.floor(8  + t*42),           // 8~50개
+    orbSpeed:  t*1.2,                            // 0~1.2 이동 속도
+    shielded:  s>40 ? Math.floor((s-40)/15) : 0, // 실드 오브 수
+    shots:     Math.max(1, 4-Math.floor(s/30)),  // 4→1발
+    required:  Math.min(30+Math.floor(t*65), 95) // 30%~95%
+  };
+}
+
+// ── 오브 생성 ───────────────────────────
+const ORB_COLORS=['#0ff','#f0f','#ff0','#0f8','#f80','#88f'];
+
+function initStage(){
+  const d=getDiff(stage);
+  orbs=[];balls=[];particles=[];scoreTexts=[];
+  orbsPopped=0;chainCombo=0;stageClearing=false;
+  shotsLeft=d.shots;shotsTotal=d.shots;
+  orbsTotal=d.orbCount;
+
+  const margin=55,cols=Math.ceil(Math.sqrt(d.orbCount*1.4));
+  for(let i=0;i<d.orbCount;i++){
+    const col=ORB_COLORS[i%ORB_COLORS.length];
+    const r=16+Math.random()*8;
+    let x,y,tries=0;
+    do{
+      x=margin+Math.random()*(W-margin*2);
+      y=margin+Math.random()*(H*0.68-margin);
+      tries++;
+    }while(tries<30&&orbs.some(o=>Math.hypot(x-o.x,y-o.y)<r+o.r+8));
+
+    const shielded=i<d.shielded;
+    orbs.push({
+      x,y,r,color:col,
+      vx:(Math.random()-0.5)*d.orbSpeed,
+      vy:(Math.random()-0.5)*d.orbSpeed,
+      hp: shielded?2:1,
+      shielded,
+      pulse:Math.random()*Math.PI*2,
+      dead:false
+    });
+  }
+  updateUI();
+  renderShots();
+}
+
+// ── 발사 ────────────────────────────────
+function shoot(mx,my){
+  if(state!=='playing'||shotsLeft<=0||stageClearing) return;
+  shotsLeft--;
+  renderShots();
+
+  const dx=mx-W/2, dy=my-(H-40);
+  const len=Math.hypot(dx,dy)||1;
+  const spd=16;
+  balls.push({
+    x:W/2, y:H-40,
+    vx:dx/len*spd, vy:dy/len*spd,
+    r:9, color:'#fff',
+    trail:[], splits:0, dead:false
+  });
+}
+
+// ── 충돌 & 폭발 ─────────────────────────
+function explodeOrb(orb,ball){
+  orb.dead=true;
+  orbsPopped++;
+  chainCombo++;
+  if(chainCombo>bestCombo) bestCombo=chainCombo;
+
+  const pts=100*chainCombo;
+  score+=pts;
+  shakePow=Math.min(shakePow+5,18);
+  chainTimer=12;
+
+  // 파티클
+  burst(orb.x,orb.y,orb.color,18);
+
+  // 점수 팝업
+  scoreTexts.push({
+    x:orb.x,y:orb.y,
+    text:`+${pts>999?Math.floor(pts/100)+'00!':pts}`,
+    color:chainCombo>=5?'#ff0':chainCombo>=3?'#f0f':'#0ff',
+    size:Math.min(11+chainCombo*1.5,26),
+    life:55, vy:-1.2
+  });
+
+  // 스플릿 볼 생성 (ball이 있을 때)
+  if(ball&&ball.splits<4){
+    const count=2+Math.floor(Math.random()*2);
+    for(let i=0;i<count;i++){
+      const a=(Math.PI*2/count)*i+Math.random()*0.5;
+      const spd=7+Math.random()*4;
+      balls.push({
+        x:orb.x,y:orb.y,
+        vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
+        r:6,color:orb.color,
+        trail:[],splits:ball.splits+1,dead:false
+      });
+    }
+  }
+
+  updateUI();
+}
+
+// ── 업데이트 ─────────────────────────────
+function update(){
+  if(state!=='playing') return;
+
+  // 흔들기
+  if(shakePow>0){shakeX=(Math.random()-0.5)*shakePow;shakeY=(Math.random()-0.5)*shakePow;shakePow*=0.82;}
+  else{shakeX=0;shakeY=0;}
+
+  // 오브 이동
+  orbs.forEach(o=>{
+    if(o.dead) return;
+    o.x+=o.vx; o.y+=o.vy;
+    o.pulse+=0.05;
+    if(o.x<o.r||o.x>W-o.r) o.vx*=-1;
+    if(o.y<o.r||o.y>H*0.72) o.vy*=-1;
+  });
+
+  // 볼 이동 & 충돌
+  balls.forEach(b=>{
+    if(b.dead) return;
+    b.trail.push({x:b.x,y:b.y});
+    if(b.trail.length>10) b.trail.shift();
+    b.x+=b.vx; b.y+=b.vy;
+    b.vy+=0.06; // 중력
+
+    // 벽 반사
+    if(b.x<b.r){b.x=b.r;b.vx*=-0.85;}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx*=-0.85;}
+    if(b.y<b.r){b.y=b.r;b.vy*=-0.85;}
+
+    // 바닥 → 죽음
+    if(b.y>H+20){ b.dead=true; return; }
+
+    // 오브 충돌
+    for(let o of orbs){
+      if(o.dead) continue;
+      if(Math.hypot(b.x-o.x,b.y-o.y)<b.r+o.r){
+        if(o.shielded&&o.hp>1){
+          o.hp--;
+          o.shielded=false;
+          burst(o.x,o.y,'#aaa',8);
+          shakePow+=3;
+          // 볼 반사
+          const nx=(b.x-o.x)/Math.hypot(b.x-o.x,b.y-o.y);
+          const ny=(b.y-o.y)/Math.hypot(b.x-o.x,b.y-o.y);
+          const dot=b.vx*nx+b.vy*ny;
+          b.vx-=2*dot*nx; b.vy-=2*dot*ny;
+        } else {
+          explodeOrb(o,b);
+          b.dead=true;
+        }
+        break;
+      }
+    }
+  });
+
+  // 연쇄 타이머
+  if(chainTimer>0){chainTimer--;}
+  else if(chainCombo>0){chainCombo=0;}
+
+  // 정리
+  balls=balls.filter(b=>!b.dead);
+  orbs=orbs.filter(o=>!o.dead||true); // 유지 (dead 표시만)
+
+  // 파티클
+  particles=particles.filter(p=>{
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.08;p.vx*=0.97;
+    p.life--;p.r*=0.94;
+    return p.life>0&&p.r>0.3;
+  });
+
+  // 점수 텍스트
+  scoreTexts=scoreTexts.filter(t=>{t.y+=t.vy;t.life--;return t.life>0;});
+
+  // 스테이지 결과 체크
+  if(!stageClearing&&balls.length===0&&shotsLeft===0){
+    checkResult();
+  }
+  if(!stageClearing&&balls.length===0&&shotsLeft>0){
+    const alive=orbs.filter(o=>!o.dead).length;
+    if(alive===0) checkResult();
+  }
+}
+
+function checkResult(){
+  stageClearing=true;
+  const pct=Math.round(orbsPopped/orbsTotal*100);
+  const req=getDiff(stage).required;
+  setTimeout(()=>{
+    if(pct>=req){
+      onClear(pct,req);
+    } else {
+      onFail(pct,req);
+    }
+  },600);
+}
+
+function onClear(pct,req){
+  score+=1000*stage;
+  doFlash('rgba(0,255,200,0.3)');
+  if(stage>=100){ showComplete(); return; }
+  showClearScreen(pct,req);
+}
+function onFail(pct,req){
+  doFlash('rgba(255,0,0,0.4)');
+  showFailScreen(pct,req);
+}
+
+function burst(x,y,color,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,s=2+Math.random()*6;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,
+      color,life:30+Math.random()*25,r:3+Math.random()*4});
+  }
+}
+function doFlash(col){
+  flashEl.style.background=col;flashEl.style.opacity='1';flashEl.style.transition='';
+  setTimeout(()=>{flashEl.style.transition='opacity 0.5s';flashEl.style.opacity='0';},80);
+  setTimeout(()=>{flashEl.style.transition='';},600);
+}
+
+// ── 그리기 ──────────────────────────────
+function draw(){
+  ctx.save();
+  ctx.translate(shakeX,shakeY);
+
+  // 배경
+  ctx.fillStyle='#03020c';
+  ctx.fillRect(-20,-20,W+40,H+40);
+
+  // 그리드
+  ctx.strokeStyle='rgba(100,0,255,0.07)';ctx.lineWidth=1;
+  for(let x=0;x<W;x+=48){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=48){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+  // 캐논
+  drawCannon();
+
+  // 오브
+  orbs.forEach(o=>{
+    if(o.dead) return;
+    const p=Math.sin(o.pulse)*3;
+
+    // 글로우
+    ctx.save();
+    ctx.shadowColor=o.color;ctx.shadowBlur=18+p;
+
+    // 실드
+    if(o.shielded){
+      ctx.strokeStyle='rgba(200,200,255,0.7)';
+      ctx.lineWidth=3;
+      ctx.setLineDash([6,4]);
+      ctx.beginPath();ctx.arc(o.x,o.y,o.r+7+p,0,Math.PI*2);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 오브 본체
+    const g=ctx.createRadialGradient(o.x-o.r*0.3,o.y-o.r*0.3,0,o.x,o.y,o.r);
+    g.addColorStop(0,'#fff');
+    g.addColorStop(0.4,o.color);
+    g.addColorStop(1,'rgba(0,0,0,0.3)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(o.x,o.y,o.r+p*0.3,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  });
+
+  // 파티클
+  ctx.save();
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life/55;
+    ctx.fillStyle=p.color;
+    ctx.shadowColor=p.color;ctx.shadowBlur=8;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;ctx.shadowBlur=0;
+  ctx.restore();
+
+  // 볼 & 트레일
+  balls.forEach(b=>{
+    // 트레일
+    b.trail.forEach((t,i)=>{
+      ctx.globalAlpha=(i/b.trail.length)*0.35;
+      ctx.fillStyle=b.color;
+      ctx.shadowColor=b.color;ctx.shadowBlur=6;
+      ctx.beginPath();ctx.arc(t.x,t.y,b.r*(i/b.trail.length)*0.7,0,Math.PI*2);ctx.fill();
+    });
+    ctx.globalAlpha=1;ctx.shadowBlur=0;
+
+    ctx.save();
+    ctx.shadowColor=b.color;ctx.shadowBlur=16;
+    const bg=ctx.createRadialGradient(b.x-2,b.y-2,0,b.x,b.y,b.r);
+    bg.addColorStop(0,'#fff');bg.addColorStop(0.5,b.color);bg.addColorStop(1,'rgba(0,0,0,0.2)');
+    ctx.fillStyle=bg;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  });
+
+  // 점수 텍스트
+  scoreTexts.forEach(t=>{
+    ctx.globalAlpha=Math.min(1,t.life/15);
+    ctx.fillStyle=t.color;ctx.shadowColor=t.color;ctx.shadowBlur=10;
+    ctx.font=`bold ${t.size}px 'Courier New'`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(t.text,t.x,t.y);
+  });
+  ctx.globalAlpha=1;ctx.shadowBlur=0;
+
+  // 진행률 바 (캔버스 내부)
+  const pct=orbsTotal>0?orbsPopped/orbsTotal:0;
+  const req=getDiff(stage).required/100;
+  // 배경
+  ctx.fillStyle='rgba(255,255,255,0.08)';
+  ctx.fillRect(20,H-28,W-40,6);
+  // 진행
+  ctx.fillStyle=pct>=req?'#0f8':'#0ff';
+  ctx.shadowColor=pct>=req?'#0f8':'#0ff';ctx.shadowBlur=6;
+  ctx.fillRect(20,H-28,(W-40)*pct,6);
+  // 목표선
+  ctx.fillStyle='#ff0';ctx.shadowColor='#ff0';ctx.shadowBlur=8;
+  ctx.fillRect(20+(W-40)*req-1,H-32,2,14);
+  ctx.shadowBlur=0;
+
+  ctx.restore();
+}
+
+function drawCannon(){
+  const cx=W/2, cy=H-30;
+  ctx.save();
+  ctx.shadowColor='#0ff';ctx.shadowBlur=14;
+  // 포신
+  ctx.strokeStyle='#0ff';ctx.lineWidth=6;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx,cy-36);ctx.stroke();
+  // 포대
+  ctx.fillStyle='#0af';
+  ctx.beginPath();ctx.ellipse(cx,cy,18,10,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#0ff';ctx.lineWidth=2;ctx.stroke();
+  ctx.restore();
+}
+
+// ── UI ───────────────────────────────────
+function updateUI(){
+  document.getElementById('u-stage').textContent=String(stage).padStart(2,'0');
+  document.getElementById('u-req').textContent=getDiff(stage).required;
+  document.getElementById('u-score').textContent=String(score).padStart(6,'0');
+  document.getElementById('u-combo').textContent=bestCombo;
+  document.getElementById('progress-bar').style.width=((stage-1)/99*100)+'%';
+}
+function renderShots(){
+  const el=document.getElementById('shots-ui');
+  el.innerHTML='';
+  for(let i=0;i<shotsTotal;i++){
+    const d=document.createElement('div');
+    d.className='shot-dot'+(i>=shotsLeft?' used':'');
+    el.appendChild(d);
+  }
+}
+
+function showClearScreen(pct,req){
+  overlay.innerHTML=`
+    <div class="ot" style="color:#0f8;text-shadow:0 0 20px #0f8">CLEARED!</div>
+    <div class="os" style="color:#ff0;font-size:clamp(14px,3.5vw,20px)">${pct}% / ${req}% REQUIRED</div>
+    <div class="os">SCORE: ${score.toLocaleString()}</div>
+    <button class="btn" onclick="nextStage()">NEXT ▶</button>
+  `;
+  overlay.style.display='flex';
+}
+function showFailScreen(pct,req){
+  overlay.innerHTML=`
+    <div class="ot" style="color:#f55;text-shadow:0 0 20px #f55">FAILED</div>
+    <div class="os" style="color:#f88">${pct}% / ${req}% REQUIRED</div>
+    <div class="os">SCORE: ${score.toLocaleString()}</div>
+    <button class="btn red" onclick="retryStage()">RETRY</button>
+    <button class="btn gray" onclick="goMenu()" style="margin-top:0">MENU</button>
+  `;
+  overlay.style.display='flex';
+}
+function showComplete(){
+  overlay.innerHTML=`
+    <div class="ot" style="color:#ff0;text-shadow:0 0 20px #ff0">🏆 COMPLETE!</div>
+    <div class="os" style="color:#0ff">ALL 100 STAGES!</div>
+    <div class="os" style="color:#ff0;font-size:clamp(16px,4vw,22px)">FINAL: ${score.toLocaleString()}</div>
+    <button class="btn" onclick="startGame()">PLAY AGAIN</button>
+  `;
+  overlay.style.display='flex';
+}
+function goMenu(){
+  stage=1;score=0;bestCombo=0;state='menu';
+  overlay.innerHTML=`
+    <div class="ot" style="color:#0ff;text-shadow:0 0 20px #0ff,0 0 40px #0ff">COSMIC POP</div>
+    <div class="os">오브를 쏴서 연쇄 폭발을 일으켜라!<br>목표 % 이상 파괴하면 클리어</div>
+    <div class="os" style="color:#f0f">클릭 / 탭으로 발사</div>
+    <button class="btn" onclick="startGame()">FIRE ▶</button>
+  `;
+  overlay.style.display='flex';
+}
+function startGame(){
+  overlay.style.display='none';
+  stage=1;score=0;bestCombo=0;state='playing';
+  initStage();
+}
+function nextStage(){
+  overlay.style.display='none';
+  stage++;state='playing';
+  initStage();
+}
+function retryStage(){
+  overlay.style.display='none';
+  state='playing';
+  initStage();
+}
+
+// ── 입력 ─────────────────────────────────
+function getPos(e){
+  const r=canvas.getBoundingClientRect();
+  const cx=e.touches?e.touches[0].clientX:e.clientX;
+  const cy=e.touches?e.touches[0].clientY:e.clientY;
+  return{
+    x:(cx-r.left)*(W/r.width),
+    y:(cy-r.top)*(H/r.height)
+  };
+}
+canvas.addEventListener('click',e=>{const p=getPos(e);shoot(p.x,p.y);});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();const p=getPos(e);shoot(p.x,p.y);},{passive:false});
+
+// ── 루프 ─────────────────────────────────
+function loop(){update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
