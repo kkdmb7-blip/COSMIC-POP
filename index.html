@@ -159,8 +159,8 @@ function initStage(){
   renderShots();
 }
 
-// ── 발사 ────────────────────────────────
-let aimAngle = -Math.PI/2; // 기본: 위쪽
+let aimAngle = -Math.PI/2;
+let dragStartY = null;
 
 function shoot(){
   if(state!=='playing'||shotsLeft<=0||stageClearing) return;
@@ -178,10 +178,8 @@ function shoot(){
 function updateAim(mx,my){
   const dx = mx - W/2;
   const dy = my - (H-50);
-  // 위쪽 반원만 허용
   if(dy < 0){
     aimAngle = Math.atan2(dy, dx);
-    // ±80도 이내로 제한
     aimAngle = Math.max(-Math.PI+0.35, Math.min(-0.35, aimAngle));
   }
 }
@@ -457,17 +455,7 @@ function drawCannon(){
   const cx=W/2, cy=H-50;
   ctx.save();
 
-  // 조준선
-  ctx.setLineDash([6,8]);
-  ctx.strokeStyle='rgba(0,255,255,0.18)';
-  ctx.lineWidth=1.5;
-  ctx.beginPath();
-  ctx.moveTo(cx,cy);
-  ctx.lineTo(cx+Math.cos(aimAngle)*220, cy+Math.sin(aimAngle)*220);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // 포신
+  // 포신만 (조준선 없음)
   ctx.shadowColor='#0ff';ctx.shadowBlur=14;
   ctx.strokeStyle='#0ff';ctx.lineWidth=7;ctx.lineCap='round';
   ctx.beginPath();
@@ -564,11 +552,17 @@ function getPos(e){
     y:(cy-r.top)*(H/r.height)
   };
 }
-canvas.addEventListener('click',e=>{ shoot(); });
-canvas.addEventListener('mousemove',e=>{const p=getPos(e);updateAim(p.x,p.y);});
-canvas.addEventListener('touchmove',e=>{e.preventDefault();const p=getPos(e);updateAim(p.x,p.y);},{passive:false});
-canvas.addEventListener('touchstart',e=>{e.preventDefault();const p=getPos(e);updateAim(p.x,p.y);},{passive:false});
-canvas.addEventListener('touchend',e=>{ e.preventDefault(); shoot(); },{passive:false});
+// 마우스: 드래그로 조준, 버튼 놓으면 발사
+let mouseDown = false;
+canvas.addEventListener('mousedown', e=>{ mouseDown=true; const p=getPos(e); updateAim(p.x,p.y); });
+canvas.addEventListener('mousemove', e=>{ if(mouseDown){ const p=getPos(e); updateAim(p.x,p.y); } });
+canvas.addEventListener('mouseup',   e=>{ if(mouseDown){ mouseDown=false; shoot(); } });
+canvas.addEventListener('mouseleave',e=>{ mouseDown=false; });
+
+// 터치: 드래그로 조준, 손 떼면 발사
+canvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e); updateAim(p.x,p.y); },{passive:false});
+canvas.addEventListener('touchmove',  e=>{ e.preventDefault(); const p=getPos(e); updateAim(p.x,p.y); },{passive:false});
+canvas.addEventListener('touchend',   e=>{ e.preventDefault(); shoot(); },{passive:false});
 
 // ── 루프 ─────────────────────────────────
 function loop(){update();draw();requestAnimationFrame(loop);}
