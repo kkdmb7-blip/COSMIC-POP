@@ -552,32 +552,52 @@ function getPos(e){
     y:(cy-r.top)*(H/r.height)
   };
 }
-// 마우스: 드래그로 조준, 버튼 놓으면 발사
-// click 이벤트는 절대 사용하지 않음
 let mouseDown=false, dragMoved=false;
+let mouseStartX=0, mouseStartY=0;
 
 canvas.addEventListener('mousedown', e=>{
   e.preventDefault();
   mouseDown=true; dragMoved=false;
-  const p=getPos(e); updateAim(p.x,p.y);
+  const p=getPos(e);
+  mouseStartX=p.x; mouseStartY=p.y;
+  updateAim(p.x,p.y);
 });
 canvas.addEventListener('mousemove', e=>{
   if(!mouseDown) return;
-  dragMoved=true;
-  const p=getPos(e); updateAim(p.x,p.y);
+  const p=getPos(e);
+  const dist=Math.hypot(p.x-mouseStartX, p.y-mouseStartY);
+  if(dist>15) dragMoved=true; // 15px 이상 드래그해야 인정
+  updateAim(p.x,p.y);
 });
 canvas.addEventListener('mouseup', e=>{
   e.preventDefault();
-  if(mouseDown){ mouseDown=false; shoot(); }
+  if(mouseDown && dragMoved){ shoot(); }
+  mouseDown=false; dragMoved=false;
 });
-canvas.addEventListener('mouseleave', e=>{ mouseDown=false; });
-// click 이벤트 완전 차단
+canvas.addEventListener('mouseleave', e=>{ mouseDown=false; dragMoved=false; });
 canvas.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); });
 
-// 터치: 드래그로 조준, 손 떼면 발사
-canvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e); updateAim(p.x,p.y); },{passive:false});
-canvas.addEventListener('touchmove',  e=>{ e.preventDefault(); const p=getPos(e); updateAim(p.x,p.y); },{passive:false});
-canvas.addEventListener('touchend',   e=>{ e.preventDefault(); shoot(); },{passive:false});
+// 터치
+let touchStartX=0, touchStartY=0, touchMoved=false;
+canvas.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  touchMoved=false;
+  const p=getPos(e);
+  touchStartX=p.x; touchStartY=p.y;
+  updateAim(p.x,p.y);
+},{passive:false});
+canvas.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  const p=getPos(e);
+  const dist=Math.hypot(p.x-touchStartX, p.y-touchStartY);
+  if(dist>15) touchMoved=true;
+  updateAim(p.x,p.y);
+},{passive:false});
+canvas.addEventListener('touchend', e=>{
+  e.preventDefault();
+  if(touchMoved) shoot();
+  touchMoved=false;
+},{passive:false});
 
 // ── 루프 ─────────────────────────────────
 function loop(){update();draw();requestAnimationFrame(loop);}
