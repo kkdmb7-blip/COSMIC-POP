@@ -553,11 +553,26 @@ function getPos(e){
   };
 }
 // 마우스: 드래그로 조준, 버튼 놓으면 발사
-let mouseDown = false;
-canvas.addEventListener('mousedown', e=>{ mouseDown=true; const p=getPos(e); updateAim(p.x,p.y); });
-canvas.addEventListener('mousemove', e=>{ if(mouseDown){ const p=getPos(e); updateAim(p.x,p.y); } });
-canvas.addEventListener('mouseup',   e=>{ if(mouseDown){ mouseDown=false; shoot(); } });
-canvas.addEventListener('mouseleave',e=>{ mouseDown=false; });
+// click 이벤트는 절대 사용하지 않음
+let mouseDown=false, dragMoved=false;
+
+canvas.addEventListener('mousedown', e=>{
+  e.preventDefault();
+  mouseDown=true; dragMoved=false;
+  const p=getPos(e); updateAim(p.x,p.y);
+});
+canvas.addEventListener('mousemove', e=>{
+  if(!mouseDown) return;
+  dragMoved=true;
+  const p=getPos(e); updateAim(p.x,p.y);
+});
+canvas.addEventListener('mouseup', e=>{
+  e.preventDefault();
+  if(mouseDown){ mouseDown=false; shoot(); }
+});
+canvas.addEventListener('mouseleave', e=>{ mouseDown=false; });
+// click 이벤트 완전 차단
+canvas.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); });
 
 // 터치: 드래그로 조준, 손 떼면 발사
 canvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e); updateAim(p.x,p.y); },{passive:false});
