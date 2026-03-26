@@ -63,7 +63,13 @@ canvas{width:100%;height:100%;display:block;cursor:crosshair;}
 .btn:hover{background:rgba(0,255,255,0.12);}
 .btn.red{border-color:#f55;color:#f55;text-shadow:0 0 8px #f55;box-shadow:0 0 16px #f55;}
 .btn.gray{border-color:#444;color:#444;box-shadow:none;text-shadow:none;}
-#progress-wrap{
+#bottom-block{
+  position:absolute;
+  bottom:0;left:0;right:0;
+  height:10%;  /* 하단 10% 클릭 완전 차단 */
+  z-index:3;
+  cursor:not-allowed;
+}
   position:absolute;bottom:0;left:0;right:0;
   height:4px;background:rgba(255,255,255,0.08);pointer-events:none;z-index:2;
 }
@@ -79,6 +85,7 @@ canvas{width:100%;height:100%;display:block;cursor:crosshair;}
   </div>
   <div id="ui-bot"><div id="shots-ui"></div></div>
   <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="bottom-block"></div>
   <div id="flash"></div>
   <div id="overlay">
     <div class="ot" style="color:#0ff;text-shadow:0 0 20px #0ff,0 0 40px #0ff">COSMIC POP</div>
@@ -108,11 +115,11 @@ let stageClearing=false;
 function getDiff(s){
   const t=(s-1)/99;
   return {
-    orbCount:  Math.floor(8  + t*42),           // 8~50개
-    orbSpeed:  t*1.2,                            // 0~1.2 이동 속도
-    shielded:  s>40 ? Math.floor((s-40)/15) : 0, // 실드 오브 수
-    shots:     Math.max(1, 4-Math.floor(s/30)),  // 4→1발
-    required:  Math.min(30+Math.floor(t*65), 95) // 30%~95%
+    orbCount:  Math.floor(12 + t*55),           // 12~67개
+    orbSpeed:  t*1.8,                            // 더 빠르게
+    shielded:  s>30 ? Math.floor((s-30)/10) : 0, // 실드 더 빨리
+    shots:     Math.max(1, 3-Math.floor(s/35)),  // 3→1발
+    required:  Math.min(40+Math.floor(t*55), 95) // 40%~95%
   };
 }
 
@@ -133,7 +140,7 @@ function initStage(){
     let x,y,tries=0;
     do{
       x=margin+Math.random()*(W-margin*2);
-      y=margin+Math.random()*(H*0.68-margin);
+      y=H*0.15+Math.random()*(H*0.55);
       tries++;
     }while(tries<30&&orbs.some(o=>Math.hypot(x-o.x,y-o.y)<r+o.r+8));
 
@@ -153,20 +160,30 @@ function initStage(){
 }
 
 // ── 발사 ────────────────────────────────
-function shoot(mx,my){
+let aimAngle = -Math.PI/2; // 기본: 위쪽
+
+function shoot(){
   if(state!=='playing'||shotsLeft<=0||stageClearing) return;
   shotsLeft--;
   renderShots();
-
-  const dx=mx-W/2, dy=my-(H-40);
-  const len=Math.hypot(dx,dy)||1;
-  const spd=16;
   balls.push({
-    x:W/2, y:H-40,
-    vx:dx/len*spd, vy:dy/len*spd,
+    x:W/2, y:H-50,
+    vx:Math.cos(aimAngle)*16,
+    vy:Math.sin(aimAngle)*16,
     r:9, color:'#fff',
     trail:[], splits:0, dead:false
   });
+}
+
+function updateAim(mx,my){
+  const dx = mx - W/2;
+  const dy = my - (H-50);
+  // 위쪽 반원만 허용
+  if(dy < 0){
+    aimAngle = Math.atan2(dy, dx);
+    // ±80도 이내로 제한
+    aimAngle = Math.max(-Math.PI+0.35, Math.min(-0.35, aimAngle));
+  }
 }
 
 // ── 충돌 & 폭발 ─────────────────────────
@@ -437,12 +454,27 @@ function draw(){
 }
 
 function drawCannon(){
-  const cx=W/2, cy=H-30;
+  const cx=W/2, cy=H-50;
   ctx.save();
-  ctx.shadowColor='#0ff';ctx.shadowBlur=14;
+
+  // 조준선
+  ctx.setLineDash([6,8]);
+  ctx.strokeStyle='rgba(0,255,255,0.18)';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.lineTo(cx+Math.cos(aimAngle)*220, cy+Math.sin(aimAngle)*220);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
   // 포신
-  ctx.strokeStyle='#0ff';ctx.lineWidth=6;ctx.lineCap='round';
-  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx,cy-36);ctx.stroke();
+  ctx.shadowColor='#0ff';ctx.shadowBlur=14;
+  ctx.strokeStyle='#0ff';ctx.lineWidth=7;ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.lineTo(cx+Math.cos(aimAngle)*40, cy+Math.sin(aimAngle)*40);
+  ctx.stroke();
+
   // 포대
   ctx.fillStyle='#0af';
   ctx.beginPath();ctx.ellipse(cx,cy,18,10,0,0,Math.PI*2);ctx.fill();
@@ -532,8 +564,11 @@ function getPos(e){
     y:(cy-r.top)*(H/r.height)
   };
 }
-canvas.addEventListener('click',e=>{const p=getPos(e);shoot(p.x,p.y);});
-canvas.addEventListener('touchstart',e=>{e.preventDefault();const p=getPos(e);shoot(p.x,p.y);},{passive:false});
+canvas.addEventListener('click',e=>{ shoot(); });
+canvas.addEventListener('mousemove',e=>{const p=getPos(e);updateAim(p.x,p.y);});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();const p=getPos(e);updateAim(p.x,p.y);},{passive:false});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();const p=getPos(e);updateAim(p.x,p.y);},{passive:false});
+canvas.addEventListener('touchend',e=>{ e.preventDefault(); shoot(); },{passive:false});
 
 // ── 루프 ─────────────────────────────────
 function loop(){update();draw();requestAnimationFrame(loop);}
