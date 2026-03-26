@@ -208,16 +208,16 @@ function explodeOrb(orb,ball){
     life:55, vy:-1.2
   });
 
-  // 스플릿 볼 생성 (ball이 있을 때)
-  if(ball&&ball.splits<4){
-    const count=2+Math.floor(Math.random()*2);
+  // 스플릿 볼 생성 - 2번까지만 분열, 볼 수도 줄이기
+  if(ball && ball.splits < 2){
+    const count = ball.splits === 0 ? 3 : 2; // 첫 폭발=3개, 2차=2개
     for(let i=0;i<count;i++){
-      const a=(Math.PI*2/count)*i+Math.random()*0.5;
-      const spd=7+Math.random()*4;
+      const a=(Math.PI*2/count)*i+Math.random()*0.4;
+      const spd=4+Math.random()*2;
       balls.push({
         x:orb.x,y:orb.y,
         vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
-        r:6,color:orb.color,
+        r:5,color:orb.color,
         trail:[],splits:ball.splits+1,dead:false
       });
     }
